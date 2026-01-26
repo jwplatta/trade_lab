@@ -20,6 +20,7 @@ class GreekExposure:
         data_dir="data",
         greek="gamma",
         multiplier=100,
+        dealer_sign=1.0,
         debug=False,
     ):
         """
@@ -32,6 +33,8 @@ class GreekExposure:
             data_dir: Directory containing option chain CSV files
             greek: One of 'gamma', 'vanna', 'charm' (default: 'gamma')
             multiplier: Contract multiplier (default: 100)
+            dealer_sign: Sign for dealer positioning (default: 1.0 for raw exposure,
+                         use -1.0 if assuming dealers are short customer OI)
             debug: Verbose output flag
         """
         if days_out > 45:
@@ -46,6 +49,7 @@ class GreekExposure:
         self.data_dir = Path(data_dir)
         self.greek = greek
         self.multiplier = multiplier
+        self.dealer_sign = dealer_sign
         self.debug = debug
 
         self.all_opts = None
@@ -255,13 +259,23 @@ class GreekExposure:
 
         exposure_df = pd.DataFrame({"strike": k, "is_call": is_call, "exposure": exposure})
 
-        # Aggregate across expirations with call/put sign convention
-        net = (
-            exposure_df.assign(sign=np.where(exposure_df["is_call"], 1.0, -1.0))
-            .assign(net_exposure=lambda d: d["exposure"] * d["sign"])
-            .groupby("strike", as_index=False)["net_exposure"]
-            .sum()
-        )
+        # Aggregate across expirations
+        # For gamma: apply call/put sign convention (calls +1, puts -1)
+        # For vanna/charm: no call/put sign flip (the greek itself encodes directionality)
+        if self.greek == "gamma":
+            net = (
+                exposure_df.assign(sign=np.where(exposure_df["is_call"], 1.0, -1.0))
+                .assign(net_exposure=lambda d: d["exposure"] * d["sign"])
+                .groupby("strike", as_index=False)["net_exposure"]
+                .sum()
+            )
+        else:
+            # Vanna/Charm: sum raw exposure without call/put sign flip
+            net = exposure_df.groupby("strike", as_index=False)["exposure"].sum()
+            net = net.rename(columns={"exposure": "net_exposure"})
+
+        # Apply dealer sign (use -1.0 if assuming dealers are short customer OI)
+        net["net_exposure"] = net["net_exposure"] * self.dealer_sign
 
         if self.debug:
             print(f"Calculated {self.greek} exposure for {len(net)} unique strikes")
