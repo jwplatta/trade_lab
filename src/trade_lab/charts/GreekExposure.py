@@ -162,7 +162,10 @@ class GreekExposure:
 
     def _calc_vanna(self, df):
         """
-        Calculate vanna per expiration using np.gradient(vega, strike).
+        Calculate vanna per expiration and contract type using np.gradient(vega, strike).
+
+        Groups by both expiration_date and contract_type to ensure unique strikes
+        within each group, avoiding divide-by-zero errors in gradient calculation.
 
         Args:
             df: DataFrame with vega and strike columns
@@ -171,17 +174,23 @@ class GreekExposure:
             DataFrame with vanna column added
         """
         result = []
-        for exp, group in df.groupby("expiration_date"):
+        for (exp, contract_type), group in df.groupby(["expiration_date", "contract_type"]):
             g = group.sort_values("K").copy()
             strikes = g["K"].to_numpy(float)
             vega = g["vega"].to_numpy(float)
-            g["vanna"] = np.gradient(vega, strikes)
+            if len(strikes) > 1:
+                g["vanna"] = np.gradient(vega, strikes)
+            else:
+                g["vanna"] = 0.0
             result.append(g)
         return pd.concat(result, ignore_index=True)
 
     def _calc_charm(self, df):
         """
-        Calculate charm per expiration using np.gradient(theta, strike).
+        Calculate charm per expiration and contract type using np.gradient(theta, strike).
+
+        Groups by both expiration_date and contract_type to ensure unique strikes
+        within each group, avoiding divide-by-zero errors in gradient calculation.
 
         Args:
             df: DataFrame with theta and strike columns
@@ -190,11 +199,14 @@ class GreekExposure:
             DataFrame with charm column added
         """
         result = []
-        for exp, group in df.groupby("expiration_date"):
+        for (exp, contract_type), group in df.groupby(["expiration_date", "contract_type"]):
             g = group.sort_values("K").copy()
             strikes = g["K"].to_numpy(float)
             theta = g["theta"].to_numpy(float)
-            g["charm"] = np.gradient(theta, strikes)
+            if len(strikes) > 1:
+                g["charm"] = np.gradient(theta, strikes)
+            else:
+                g["charm"] = 0.0
             result.append(g)
         return pd.concat(result, ignore_index=True)
 
